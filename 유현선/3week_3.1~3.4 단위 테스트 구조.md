@@ -101,15 +101,92 @@ AAA 패턴과 Given-When-Then 패턴
 
 ---
 
-## 3.3 테스트 간 테스트 픽스처 재사용
+## 3.3 테스트 간 테스트 픽스처 재사용 
+
+테스트 픽스처 
+- 테스트 실행 대상 객체 
+- 각 테스트 실행 전에 알려진 고정 상태로 유지하기 때문에 동일한 결과를 생성
+
+```java
+
+public class CustomerTests {
+    private Store store;
+    private Customer sut;
+    
+    @BeforeEach
+    void startTest() {
+        store = new Store();
+        store.addInventory(Product.Shampoo, 10);
+        sut = new Customer();
+    }
+    
+    @Test
+    void purchase_succeeds_when_enough_inventory() {
+        boolean success = sut.purchase(store, Product.Shampoo, 5);
+        
+        assertTrue(success);
+        assertEquals(5, store.getInventory(Product.Shampoo));
+    }
+    
+    @Test
+    void purchase_fails_when_not_enough_inventory() {
+        boolean success = sut.purchase(store, Product.Shampoo, 15);
+
+        assertFalse(success);
+        assertEquals(10, store.getInventory(Product.Shampoo));
+    }
+}
+
+```
+
+- 테스트 간 결합도가 높아짐
+- 테스트 가독성이 떨어진다.
+
 
 ### 3.3.1 테스트 간의 높은 결합도는 안티 패턴이다
 - 테스트를 수정해도 다른 테스트에 영향을 주어서는 안됨 
 - 테스트 클래스에 공유 상태를 두면 안됨
 
 ### 3.3.2 테스트 가독성을 떨어뜨리는 생성자 사용
+- 테스트만 보고는 전체 그림을 볼 수 없는 문제가 생김
+- 독립적인 테스트를 작성하여 불확실성을 없애자.
 
 ### 3.3.3 더 나은 테스트 픽스처 재사용법
+```java 
+public class CustomerTests {
+    @Test
+    void purchase_succeeds_when_enough_inventory() {
+        Store store = createStoreWithInventory(Product.Shampoo, 10);
+        Customer sut = createCustomer();
+        
+        boolean success = sut.purchase(store, Product.Shampoo, 5);
+        
+        assertTrue(success);
+        assertEquals(5, store.getInventory(Product.Shampoo));
+    }
+    
+    @Test
+    void purchase_fails_when_not_enough_inventory() {
+        Store store = createStoreWithInventory(Product.Shampoo, 10);
+        Customer sut = CreateCustomer();
+
+        boolean success = sut.purchase(store, Product.Shampoo, 15);
+
+        assertFalse(success);
+        assertEquals(10, store.getInventory(Product.Shampoo));
+    }
+    
+    private Store createStoreWithInventory(Product product, int quantity) {
+        Store store = new Store();
+        store.addInventory(product, quantity);
+        return store;
+    }
+    
+    private static Customer createCustomer() {
+        return new Customer();
+    }
+}
+```
 
 
 ---
