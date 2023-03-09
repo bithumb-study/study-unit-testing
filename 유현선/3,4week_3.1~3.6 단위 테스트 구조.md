@@ -206,3 +206,16 @@ public class CustomerTests {
 
 코드를 테스트 하는 것이 아니라 어플리케이션 동작을 테스트하는 것임을 명심하는게 중요  
 
+
+---
+
+## 3.5 매개변수화된 테스트 리팩터링하기 
+
+> JUnit : Parameterized 
+
+---
+
+## 3.6 검증문 라이브러리를 사용한 테스트 가독성 향상
+
+> AssertJ  
+> http://joel-costigliola.github.io/assertj/  
