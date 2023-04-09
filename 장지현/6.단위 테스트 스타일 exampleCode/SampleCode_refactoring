@@ -1,0 +1,80 @@
+public class AuditManager{
+    private readonly int _maxEntriesPerFile;
+
+    public AuditManager(int maxEntriesPerFile, string directoryName){
+        _maxEntriesPerFile = maxEntriesPerFile;
+    }
+
+    public void AddRecord(FileContent[] files, string visitorName, DateTime timeOfVisit){
+        (int index, FileContent file)[] sorted = SortByIndex(filePath);
+
+        string newRecord = visitorName + ';' + timeOfVisit;
+
+        if(sorted.Length == 0){
+            return new FileUpdate("audit_1.txt", newRecord);            // 업데이트 명령 반환
+        }
+
+        (int currentFileIndex, FileContent currentFile) = sorted.Last();
+        List<string> lines = currentFile.Lines.ToList();
+
+        if(lines.Count < _maxEntriesPerFile){
+            lines.Add(newRecord);
+            string newContent = string.Join("\r\n", lines);
+            return new FileUpdate(currentFile.FileName, newContent);    // 업데이트 명령 반환
+        } else {
+            int newIndex = currentFileIndex + 1;
+            string newName = $"audit_{newIndex}.txt";
+            return new FileUpdate(newName, newRecord);                  // 업데이트 명령 반환
+        }
+    }
+}
+
+public class FileContent{
+    public readonly string FileName;
+    public readonly string Text; // 이전 버전 -> string[] Lines;
+
+    public FileContent(String fileName, string text){
+        FileName = fileName;
+        Text = text;
+    }
+}
+
+public class FileUpdate{
+    public readonly string FileName;
+    public readonly string NewContent;
+
+    public FileUpdate(string fileName, string newContent){
+        FileName = fileName;
+        NewContent = newContent;
+    }
+}
+
+public class Persister{
+    public FileContent[] ReadDirectory(string directoryName){           // 작업 디렉터리에서 내용을 읽음
+        return Directory
+            .GetFiles(directoryName)
+            .Select(x => new FileContent(Path.GetFileName(x), File.ReadAllLines(x))).ToArray();
+    }
+
+    public void ApplyUpdate(string directoryName, FileUpdate update){   // 업데이트 명령을 수행
+        string filePath = Path.Combine(directoryName, update.FileName);
+        File.WriteAllText(filePath, update.NewContent);
+    }
+}
+
+public class ApplicationService{    // 함수형 코어(AuditManager)와 가변셀(Persister)을 붙이면서 애플리케이션 서비스가 외부 클라이언트를 위한 시스템의 진입점을 제공
+    private readonly string _directoryName;
+    private readonly AuditManger _auditManager;
+    private readonly Persister _persister;
+
+    public ApplicationService(string directoryName, int maxEntriesPerFile){
+        _directoryName = directoryName;
+        _auditManager = new AuditManager(maxEntriesPerFile);
+        _persister = new Persister();
+    }
+    public void AddRecord(string visiterName, DateTime timeOfVisit){    // 감사 시스템의 동작을 쉽게 확인 가능
+        FileContent[] files = _persister.ReadDirectory(_directoryName);
+        FileUpdate update = _auditManager.AddRecord(files, visitorName, timeOfVisit);
+        _persister.ApplyUpdate(_directoryName, update);
+    }
+}
