@@ -129,3 +129,383 @@ public Comment addComment(String text){
 - 두 아키텍처의 차이점은 사이드 이펙트에 대한 처리이다
 - 함수형 아키텍처는 모든 사이드 이펙트를 불변 코어에서 비즈니스 연산 가장자리로 밀어내고 가장자리는 가변 셸이 처리함
 - 반면 육각형 아키텍처의 모든 수정 사항은 도메인 계층 내에 있어야 하며 계층의 경계를 넘어서는 안됨
+
+## 6.4 함수형 아키텍처와 출력 기반 테스트로의 전환
+
+- 함수형 아키텍처 리팩터링 단계
+    - 프로세스 외부 의존성에서 목으로 변경
+    - 목에서 함수형 아키텍처로 변경
+
+### 6.4.1 감사 시스템 소개
+
+```java
+public class AuditManager {
+    private int maxEntriesPerFile;
+    private String directoryName;
+
+    public AuditManager(int maxEntriesPerFile, String directoryName) {
+        this.maxEntriesPerFile = maxEntriesPerFile;
+        this.directoryName = directoryName;
+    }
+
+    public void addRecord(String visitorName, LocalDateTime timeOfVithrows IOException {
+
+        String[] filePaths = Files.list(Paths.get(directoryName))
+                .map(Path::toString)
+                .toArray(String[]::new);
+        List<Tuple<Integer, String>> sorted = sortByIndex(filePaths);
+
+        String newRecord = visitorName + ";" + timeOfVisit;
+
+        if (sorted.isEmpty()) {
+            String newFile = Paths.get(directoryName, "audit_1.txt").toString();
+            Files.write(Paths.get(newFile), newRecord.getBytes());
+            return;
+        }
+
+        Tuple<Integer, String> lastFile = sorted.get(sorted.size() - 1);
+        List<String> lines = Files.readAllLines(Paths.get(lastFile.getPath()));
+
+        if (lines.size() < maxEntriesPerFile) {
+            lines.add(newRecord);
+            String newContent = String.join(System.lineSeparator(), lines);
+            Files.write(Paths.get(lastFile.getPath()), newContent.getBytes());
+        } else {
+            int newIndex = lastFile.getIndex() + 1;
+            String newName = String.format("audit_%d.txt", newIndex);
+            String newFile = Paths.get(directoryName, newName).toString();
+            Files.write(Paths.get(newFile), newRecord.getBytes());
+        }
+    }
+
+    private List<Tuple<Integer, String>> sortByIndex(String[] filePaths) {
+        List<Tuple<Integer, String>> tuples = new ArrayList<>();
+        for (String filePath : filePaths) {
+            File file = new File(filePath);
+            String fileName = file.getName();
+            if (fileName.matches("audit_\\d+\\.txt")) {
+                String indexString = fileName.substring(6, fileName.length() - 4);
+                int index = Integer.parseInt(indexString);
+                tuples.add(new Tuple<>(index, filePath));
+            }
+        }
+        tuples.sort(Comparator.comparing(Tuple::getIndex));
+        return tuples;
+    }
+
+    private static class Tuple<K, V> {
+        private final K index;
+        private final V path;
+
+        public Tuple(K index, V path) {
+            this.index = index;
+            this.path = path;
+        }
+
+        public K getIndex() {
+            return index;
+        }
+
+        public V getPath() {
+            return path;
+        }
+    }
+
+}
+```
+
+- 메소드 설명
+    - 작업 디렉터리에서 전체 파일 목록을 검색한다.
+    - 인덱스별로 정렬한다(모든 파일 이름은 audit_{index}.txt 와 같은 패턴을 따른다.)
+    - 아직 감사 파일이 없으면 단일 레코드로 첫 번째 파일을 생성한다.
+    - 감사 파일이 있으면 최신 파일을 가져와서 파일의 항목 수가 한계에 도달했는지에 따라 새 레코드를 추가하거나 새 파일을 생성한다.
+- 위의 클래스가 단위 테스트로 부적절한 이유
+    - 파일을 올바른 위치에 배치하고, 테스트가 끝나면 해당 파일을 일고 내용을 확인한 후 삭제해야함 → 파일 시스템과 밀접히 연결
+    - 단위테스트의 특성인 빠르게 수행하고와 다른 테스트와 별도로 처리한다에 부합하지 않으므로 통합 테스트에 해당
+
+## 6.4.2 테스트를 파일 시스템에서 분리하기 위한 목 사용
+
+- 파일의 모든 연산을 별도의 클래스(IFileSystem)로 도출하고 AuditManager에 생성자로 해당 클래스 주입하여 사용
+
+```java
+public class AuditManager {
+    private int maxEntriesPerFile;
+    private String directoryName;
+    private IFileSystem fileSystem;
+
+    public AuditManager(int maxEntriesPerFile, String directoryName, IFileSystem fileSystem) {
+        this.maxEntriesPerFile = maxEntriesPerFile;
+        this.directoryName = directoryName;
+        this.fileSystem = fileSystem;
+    }
+
+    public void addRecord(String visitorName, LocalDateTime timeOfVisit) throws IOException {
+
+        String[] filePaths = fileSystem.list(Paths.get(directoryName))
+                .map(Path::toString)
+                .toArray(String[]::new);
+        List<Tuple<Integer, String>> sorted = sortByIndex(filePaths);
+
+        String newRecord = visitorName + ";" + timeOfVisit;
+
+        if (sorted.isEmpty()) {
+            String newFile = Paths.get(directoryName, "audit_1.txt").toString();
+            fileSystem.write(Paths.get(newFile), newRecord.getBytes());
+            return;
+        }
+
+        Tuple<Integer, String> lastFile = sorted.get(sorted.size() - 1);
+        List<String> lines = fileSystem.readAllLines(Paths.get(lastFile.getPath()));
+
+        if (lines.size() < maxEntriesPerFile) {
+            lines.add(newRecord);
+            String newContent = String.join(System.lineSeparator(), lines);
+            fileSystem.write(Paths.get(lastFile.getPath()), newContent.getBytes());
+        } else {
+            int newIndex = lastFile.getIndex() + 1;
+            String newName = String.format("audit_%d.txt", newIndex);
+            String newFile = Paths.get(directoryName, newName).toString();
+            fileSystem.write(Paths.get(newFile), newRecord.getBytes());
+        }
+    }
+
+    private List<Tuple<Integer, String>> sortByIndex(String[] filePaths) {
+        List<Tuple<Integer, String>> tuples = new ArrayList<>();
+        for (String filePath : filePaths) {
+            File file = new File(filePath);
+            String fileName = file.getName();
+            if (fileName.matches("audit_\\d+\\.txt")) {
+                String indexString = fileName.substring(6, fileName.length() - 4);
+                int index = Integer.parseInt(indexString);
+                tuples.add(new Tuple<>(index, filePath));
+            }
+        }
+        tuples.sort(Comparator.comparing(Tuple::getIndex));
+        return tuples;
+    }
+
+    private static class Tuple<K, V> {
+        private final K index;
+        private final V path;
+
+        public Tuple(K index, V path) {
+            this.index = index;
+            this.path = path;
+        }
+
+        public K getIndex() {
+            return index;
+        }
+
+        public V getPath() {
+            return path;
+        }
+    }
+
+    public interface IFileSystem{
+        Stream<Path> list(Path directoryName);
+        void write(Path filePath, byte[] bytes);
+        List<String> readAllLines(Path filePath);
+    }
+
+}
+```
+
+- 위와 같이 리팩터링 하게 된다면 AuditManager는 파일 시스템에서 분리되므로 공유 의존성이 사라지고 테스트를 독립적으로 실행할 수 있다
+
+```java
+public class AuditManagerTest {
+
+    @Test
+    void new_file_is_created_when_the_current_file_overflows() throws Exception {
+        IFileSystem fileSystemMock = mock(IFileSystem.class);
+        when(fileSystemMock.list(Paths.get("audits"))).thenReturn(Stream.of(
+                Paths.get("audits/audit_1.txt"),
+                Paths.get("audits/audit_2.txt")
+        ));
+        when(fileSystemMock.readAllLines(Paths.get("audits/audit_2.txt"))).thenReturn(List.of(
+                "Peter; 2019-04-06",
+                "Jane; 2019-04-06",
+                "Jack; 2019-04-06"
+        ));
+
+        AuditManager sut = new AuditManager(3, "audits", fileSystemMock);
+
+        sut.addRecord("Alice", LocalDateTime.parse("2019-04-06T00:00:00"));
+
+        verify(fileSystemMock).write(Paths.get("audits/audit_3.txt"), "Alice;2019-04-06T00:00".getBytes());
+    }
+}
+```
+
+- 위의 테스트 코드에는 복잡한 설정을 포함하기에 유지비 측면에서 이상적이지 않다
+- 목 라이브러리가 최선을 다해 도움을 주지만, 작성된 테스트 코드는 여전히 평이한 입출력에 의존하는 테스트인 만큼 읽기가 어려움
+
+### 6.4.3 함수형 아키텍처로 리팩터링하기
+
+- 사이드 이펙트를 클래스 외부로 완전히 이동하여 AuditManager에 의존성을 제거
+
+```java
+public class AuditManager {
+    private int maxEntriesPerFile;
+
+    public AuditManager(int maxEntriesPerFile) {
+        this.maxEntriesPerFile = maxEntriesPerFile;
+    }
+
+    public FileUpdate addRecord(FileContent[] files, String visitorName, LocalDateTime timeOfVisit) throws IOException {
+
+        List<Tuple<Integer, FileContent>> sorted = sortByIndex(filePaths);
+
+        String newRecord = visitorName + ";" + timeOfVisit;
+
+        if (sorted.isEmpty()) {
+            String newFile = Paths.get(directoryName, "audit_1.txt").toString();
+            fileSystem.write(Paths.get(newFile), newRecord.getBytes());
+            return;
+        }
+
+        Tuple<Integer, String> lastFile = sorted.get(sorted.size() - 1);
+        List<String> lines = fileSystem.readAllLines(Paths.get(lastFile.getPath()));
+
+        if (lines.size() < maxEntriesPerFile) {
+            lines.add(newRecord);
+            String newContent = String.join(System.lineSeparator(), lines);
+            fileSystem.write(Paths.get(lastFile.getPath()), newContent.getBytes());
+        } else {
+            int newIndex = lastFile.getIndex() + 1;
+            String newName = String.format("audit_%d.txt", newIndex);
+            String newFile = Paths.get(directoryName, newName).toString();
+            fileSystem.write(Paths.get(newFile), newRecord.getBytes());
+        }
+    }
+}
+
+// FileContent
+// 결정을 내리기 위해 파일 시스템에 대해 알아야 할 모든 것을 포함하는 클래스
+public class FileContent{
+  public String fileName;
+  public String[] lines;
+
+  public FileContent(String fileName, String[] lines){
+    this.fileName = fileName;
+    this.lines = lines;
+  }
+}
+
+// FileUpdate
+// 작업 디렉터리의 파일을 변경하는 대신, AuditManager는 사이드 이펙트에 대한 명령을 반환
+public class FileUpdate{
+  public String fileName;
+  public String newContent;
+
+  public FileUpdate(String fileName, String newContent){
+    this.fileName = fileName;
+    this.newContent = newContent;
+  }
+}
+
+// Persister
+public class Persister {
+    public FileContent[] ReadDirectory(String directoryName) throws IOException {
+        return Files.walk(Paths.get(directoryName))
+                .filter(Files::isRegularFile)
+                .map(path -> new FileContent(path.getFileName().toString(),
+                        Files.readAllLines(path)))
+                .toArray(FileContent[]::new);
+    }
+
+    public void ApplyUpdate(String directoryName, FileUpdate update) throws IOException {
+        String filePath = Paths.get(directoryName, update.fileName).toString();
+        Files.write(Paths.get(filePath), update.newContent.getBytes());
+    }
+
+```
+
+- 위의 방식으로 Persister의 코드를 간결하게 개선할 수 있다
+- 이런 분리를 유지하려면 FileContent와 FileUpdate의 인터페이스를 프레임워크에 내장된 파일 상호 작용 명령과 최대한 가깝게 두어야 함
+
+```java
+// AuditManager와 Persister를 붙이는 애플리케이션 서비스
+public class ApplicationService{
+    private String directoryName;
+    private AuditManager auditManager;
+    private Persister persister;
+    
+    public void addRecord(String visitorName, LocalDateTime timeOfVisit){
+        FileContent[] files = persister.readDirectory(directoryName);
+        FileUpdate update = auditManager.addRecord(files, visitorName, timeOfVisit);
+        persister.ApplyUpdate(directoryName, update);
+    }
+}
+```
+
+- 이러한 설계로 리팩토링하여 애플리케이션 서비스에서 클라이언트 진입점을 생성하고, Persister는 파일 I/O의 책임만을 가지며 AuditManager는 Persister에서 필요한 명령만을 생성함
+
+```java
+public class AuditManagerTest {
+
+    @Test
+    void new_file_is_created_when_the_current_file_overflows() throws Exception {
+        IFileSystem fileSystemMock = mock(IFileSystem.class);
+        when(fileSystemMock.list(Paths.get("audits"))).thenReturn(Stream.of(
+                Paths.get("audits/audit_1.txt"),
+                Paths.get("audits/audit_2.txt")
+        ));
+        when(fileSystemMock.readAllLines(Paths.get("audits/audit_2.txt"))).thenReturn(List.of(
+                "Peter; 2019-04-06",
+                "Jane; 2019-04-06",
+                "Jack; 2019-04-06"
+        ));
+
+        AuditManager sut = new AuditManager(3, "audits", fileSystemMock);
+
+        sut.addRecord("Alice", LocalDateTime.parse("2019-04-06T00:00:00"));
+
+        verify(fileSystemMock).write(Paths.get("audits/audit_3.txt"), "Alice;2019-04-06T00:00".getBytes());
+    }
+}
+```
+
+**리팩토링 기반으로 작성된 테스트**
+
+```java
+public class AuditManagerTest {
+
+    @Test
+    void new_file_is_created_when_the_current_file_overflows() throws Exception {
+        AuditManager sut = new AuditManager(3);
+        FileContent[] files = new FileContent[]{
+                new FileContent("audit_1.txt", new String[0]),
+                new FileContent("audit_2.txt", new String[]{
+                        "Peter; 2019-04-06",
+                        "Jane; 2019-04-06",
+                        "Jack; 2019-04-06"
+                })
+        };
+        
+        FileUpdate update = sut.addRecord(files, "Alice", LocalDateTime.parse("2019-04-06"));
+        
+        Assert.Equal("audit_3.txt", update.getFileName());
+        Assert.Equal("Alice;2019-04-06", update.getNewContent());
+    }
+}
+```
+
+## 6.5 함수형 아키텍처의 단점 이해하기
+
+### 6.5.1 함수형 아키텍처 적용 가능성
+
+- 예를 들어 방문자의 접근 레벨에 따라 다른 동작을 수행하고, 방문자의 접근 레벨이 모두 데이터베이스에 저장되어 있다면 addRecord 메서드에 숨은 입력이 생겨 수학적 함수가 될 수 없음
+- 이에 대한 동작을 억지로 구현하려하다보면 필요없음에도 데이터베이스를 조회하는 성능저하나 클래스 책임이 모호해질 수 있다
+
+### 6.5.2 성능단점
+
+- 출력 기반 테스트(함수형 아키텍처 사용)는 목을 사용한 테스트만큼 빠르게 동작하지만 시스템은 외부 의존성을 더 많이 호출하기에 성능이 낮아짐
+- 함수형 아키텍처와 전통적인 아키텍처 사이의 선택은 성능과 코드 유지 보수성 간의 절충
+
+### 6.5.3 코드베이스 크기 증가
+
+- 위의 예제에서 알 수 있듯 함수형 아키텍쳐를 통해 코드 복잡도가 낮아지고 유지 보수성이 향상되지만, 코딩을 훨씬 많이 요구함
+- 이러한 추가 비용을 감수하여도 괜찮을 프로젝트에서만 적용
+- 또한 출력 기반 테스트만 의존하는 것이 아닌 통신 기반 스타일을 섞어가며 코드 생성 비용에 대해 고민하고 적용
