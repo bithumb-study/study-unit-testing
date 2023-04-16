@@ -1,0 +1,44 @@
+public class AuditManager{
+    private readonly int _maxEntriesPerFile;
+    private readonly string _directoryName;
+    private readonly IFileSystem = _fileSystem; // 파일 시스템을 나타내는 새로운 인터페이스
+
+    public AuditManager(int maxEntriesPerFile, string directoryName, IFileSystem fileSystem){
+        _maxEntriesPerFile = maxEntriesPerFile;
+        _directoryName = directoryName;
+        _fileSystem = fileSystem;               // 파일 시스템을 나타내는 새로운 인터페이스
+    }
+
+    public void AddRecord(string visitorName, DateTime timeOfVisit){
+        string[] filePath = _fileSystem.GetFiles(_directoryName);           // 새로운 인터페이스 활용
+        (int index, string path)[] sorted = SortByIndex(filePath);
+
+        string newRecord = visitorName + ';' + timeOfVisit;
+
+        if(sorted.Length == 0){
+            string newFile = Path.Combine(_directoryName, "audit_1.txt");
+            _fileSystem.WriteAllText(newFile, newRecord);                   // 새로운 인터페이스 활용
+            return;
+        }
+
+        (int currentFileIndex, string currentFilePath) = sorted.Last();
+        List<string> lines = _fileSystem.ReadAllLines(currentFilePath).ToList();   // 새로운 인터페이스 활용
+
+        if(lines.Count < _maxEntriesPerFile){
+            lines.Add(newRecord);
+            string newContent = string.Join("\r\n", lines);
+            _fileSystem.WriteAllText(currentFilePath, newContent);          // 새로운 인터페이스 활용
+        } else {
+            int newIndex = currentFileIndex + 1;
+            string newName = $"audit_{newIndex}.txt";
+            string newFile = Path.Combine(_directoryName, newName);
+            _fileSystem.WriteAllText(newFile, newRecord);                   // 새로운 인터페이스 활용
+        }
+    }
+}
+
+public interface IFileSystem{
+    string[] GetFiles(string directoryName);
+    void WriteAllText(string filePath, string content);
+    List<string> ReadAllLines(string filePath);
+}

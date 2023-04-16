@@ -1,0 +1,36 @@
+public class AuditManager{
+    private readonly int _maxEntriesPerFile;
+    private readonly string _directoryName;
+
+    public AuditManager(int maxEntriesPerFile, string directoryName){
+        _maxEntriesPerFile = maxEntriesPerFile;
+        _directoryName = directoryName;
+    }
+
+    public void AddRecord(string visitorName, DateTime timeOfVisit){
+        string[] filePath = Directory.GetFiles(_directoryName);             // 직업 디렉터리에서 전체 파일 목록을 검색
+        (int index, string path)[] sorted = SortByIndex(filePath);          // 인덱스 별로 정렬 (모든 파일 이름은 audit_{newIndex}.txt와 같은 패턴을 가짐)
+
+        string newRecord = visitorName + ';' + timeOfVisit;
+
+        if(sorted.Length == 0){                                             // 아직 감사 파일이 없으면 단일 레코드로 첫 번째 파일을 생성
+            string newFile = Path.Combine(_directoryName, "audit_1.txt");
+            File.WriteAllText(newFile, newRecord);
+            return;
+        }
+
+        (int currentFileIndex, string currentFilePath) = sorted.Last();     // 감사 파일 중 최신파일을 가져옴
+        List<string> lines = File.ReadAllLines(currentFilePath).ToList();   // 파일 항목 수 조회
+
+        if(lines.Count < _maxEntriesPerFile){                               // 파일 항목수 한계X -> 새 레코드 추가
+            lines.Add(newRecord);
+            string newContent = string.Join("\r\n", lines);
+            File.WriteAllText(currentFilePath, newContent);
+        } else {                                                            // 파일 항목수 한계O -> 새 파일 생성
+            int newIndex = currentFileIndex + 1;
+            string newName = $"audit_{newIndex}.txt";
+            string newFile = Path.Combine(_directoryName, newName);
+            File.WriteAllText(newFile, newRecord);
+        }
+    }
+}
