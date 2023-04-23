@@ -148,3 +148,101 @@ public class UserController {
 
 - UserController가 컨트롤러 사분면에 확실히 있으려면(위에 나온 문제를 해결하려면) 재구성 로직을 추출해야 함.
 - ORM 라이브러리를 사용해 데이터베이스를 도메인 모델에 매핑하면, 재구성 로직을 옮기기 적절한 위치가 됨
+
+## 7.3 최적의 단위 테스트 커버리지 분석
+
+|  | 협력자가 거의 없음 | 협력자가 많음 |
+| --- | --- | --- |
+| 복잡도와 도메인 유의성이 높음 | User → changeEmail
+Company → changeNumberOfEmployees, isEmailCorporate
+CompanyFactory → create |  |
+| 복잡도와 도메인 유의성이 낮음 | User와 Company 생성자 | UserController의 changeEmail |
+
+### 7.3.1 도메인 계층과 유틸리티 코드 테스트하기
+
+좌측 상단 테스트 메서드가 비용 편익 측면에서 최상의 결과를 가져옴
+
+```java
+// User 테스트 예제
+
+public void changing_email_from_non_corporate_to_corporate(){
+    var company = new Company("mycorp.com", 1);
+    var sut = new User(1, "user@gmail.com", UserType.Customer);
+    
+    sut.changeEmail("new@mycorp.com", company);
+    
+    Assert.Equal(2, company.NumberOfEmployees);
+    Assert.Equal("new@mycorp.com", sut.Email);
+    Assert.Equal(UserType.Emloyy, sut.Type);
+}
+
+// 전체 커버리지를 달성하려면 다음 3개의 테스트가 더 필요
+public void chainging_email_from_corporate_to_non_corporate()
+public void chainging_email_without_chaging_user_type()
+public void chainging_email_to_the_same_one()
+```
+
+### 7.3.2 나머지 세 사분면에 대한 코드 테스트하기
+
+좌측하단과 우측하단은 테스트할 것이 거의 없으며 회귀 방지가 떨어지는 요소
+
+### 7.3.3 전제 조건을 테스트해야 하는가?
+
+일반적으로 권장하는 지침은 도메인 유의성이 있는 모든 전제 조건을 테스트. 단순 버그사항도 마찬가지
+
+## 7.4 컨트롤러에서 조건부 로직 처리
+
+- 비즈니스 로직과 오케스트레이션의 분리는 다음과 같이 비즈니스 연산이 세 단계로 있을 때 가장 효과적
+    - 저장소에서 데이터 검색
+    - 비즈니스 로직 실행
+    - 데이터를 다시 저장소에 저장
+- 비즈니스 연산 중에 프로세스 외부 의존성을 참조해야 하는 경우 육각형 아키텍처가 제대로 작동하지 않음
+    - 극복방법1. 외부에 대한 모든 읽기와 쓰기를 가장자리로 밀어낸다. 읽고-결정하고-실행하기 구조를 유지하지만 성능이 저하됨
+    - 극복방법2. 도메인 모델에 프로세스 외부 의존성을 주입하고 비즈니스 로직이 해당 의존성을 호출할 시점을 직접 결정할 수 있게 한다
+    - 극복방법3. 의사 결정 프로세스 단계를 더 세분화하고, 각 단계별로 컨트롤러를 실행하도록 한다
+- 다음 세 가지 특성의 균형을 맞추는 것
+    - 도메인 모델 테스트 유의성
+    - 컨트롤러 단순성
+    - 성능
+- 위의 극복방법은 세 가지 특성 중 두 가지 특성만을 가진다
+    - 외부에 대한 모든 읽기와 쓰기를 비즈니스 연상 가장자리로 밀어내기 → 성능 저하
+    - 도메인 모델에 외부 의존성 주입 → 도메인 모델 테스트 유의성 저하
+    - 의사 결정 프로세스 단계를 더 세분화하기 → 컨트롤러 단순성 저하
+- 대부분의 소프트웨어 프로그램은 성능이 주요하기에 첫 번째 방법은 고려할 필요가 없고, 두 번째 옵션은 테스트와 유지보수가 어려워지기에 피하는 것이 좋다
+- 그에 따라 세 번째 옵션만이 남았는데 컨트롤러가 복잡해지는 문제를 완화하는 방법을 다음 챕터에서 소개
+
+### 7.4.1 CanExecute / Execute 패턴 사용
+
+- 이메일은 사용자가 확인하기 전까지만 변경할 수 있고 확인한 이후에는 오류가 발생하는 속성 추가
+
+```java
+// CanExecute / Execute 패턴을 적용한 예제
+ 
+public class User{
+    public int userId;
+    public String email;
+    public UserType type;
+    public bool isEmailConfirmed;
+
+    public String canChangeEmail(){
+        if(isEmailConfirmed)
+            return "Can't change a confirmed email";
+        return null;
+    }
+    
+    public void changeEmail(String newEmail, Company company){
+        Precondition.Requires(canChangeEmail() == null);
+        
+        /* 메서드의 나머지 부분 */
+    }
+}
+```
+
+- 해당 코드의 이점
+    - 컨트롤러는 더 이상 이메일 변경 프로세스를 알 필요 없이 canChangeEmail 메서드로 확인할 수 있다
+    - changeEmail의 전제 조건이 추가돼도 먼저 확인하지 않으면 이메일을 변경할 수 없도록 보장
+
+### 7.4.2 도메인 이벤트를 사용해 도메인 모델 변경 사항 추적
+
+- 도메인 이벤트: 애플리케이션 내에서 도메인 전문가에게 중요한 이벤트를 뜻함
+- 현 구현 알림 기능의 결함(변경이 이뤄지지 않아도 메세지로 알림을 보냄)
